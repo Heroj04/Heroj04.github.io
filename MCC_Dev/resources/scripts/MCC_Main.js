@@ -190,24 +190,84 @@ function getInputValues(inputs) {
 	return output
 }
 
-async function drawLayer(layer, context) {
+async function drawLayer(layer, context, inputs) {
+	// Check the Layer Conditions
+	if (!(processConditions(layer.conditions, inputs))) {
+		console.debug("Conditions for layer " + layer.description + " not met")
+		// If the layer conditions are not met just return doing nothing
+		return
+	}
+
+	// Substitute layer properties from inputs
+	for (const layerProperty in layer.inputs) {
+		if (layer.inputs.hasOwnProperty(layerProperty)) {
+			const inputName = layer.inputs[layerProperty];
+			if (inputs[inputName]) {
+				layer[layerProperty] = inputs[inputName]
+			}
+		}
+	}
+
+	// Draw the layers
 	switch (layer.type) {
+		case "group":
+			// Create a new Canvas for the group
+			let subCanvas = createCanvas(layer.width, layer.height)
+			let subContext = subCanvas.getContext("2d")
+			// Draw the sublayers to the new canvas
+			for (let index = 0; index < layer.layers.length; index++) {
+				const subLayer = layer.layers[index];
+				try {
+					await drawLayer(subLayer, subContext, inputs)
+				} catch (error) {
+					console.error(`Failed to draw layer ${subLayer.description} - ${error.message}`)
+				}
+			}
+			// Draw the new canvas to the original canvas
+			context.drawImage(subCanvas, layer.originX, layer.originY, layer.width, layer.height)
+			break;
+
 		case "text":
 			// Scale Text to size
 			let scaledText = await scaleTextLayer(layer)
 			// Draw the text to the canvas
 			context.drawImage(scaledText, layer.originX, layer.originY, layer.width, layer.height)
 			break;
+	
 		case "image":
 			// Scale Image to size
 			let scaledImage = await scaleImageLayer(layer)
 			// Draw the scaled image to the canvas
 			context.drawImage(scaledImage, layer.originX, layer.originY, layer.width, layer.height)
 			break;
+
+		case "fill":
+			// Draw a filled rectangle
+			context.save()
+			context.fillStyle = layer.fillStyle
+			context.fillRect(layer.originX, layer.originY, layer.width, layer.height)
+			context.restore()
+			break;
+		
+		case "mask":
+			// Scale Image to size
+			let maskImage = await scaleImageLayer(layer)
+			// Draw the scaled image to the canvas for each operation
+			layer.operations.forEach(operation => {
+				context.save()
+				context.globalCompositeOperation = operation
+				context.drawImage(maskImage, layer.originX, layer.originY, layer.width, layer.height)
+				context.restore()
+			});
+			break;
+
 		default:
+			console.error("Unknown Layer type")
 			break;
 	}
 }
+
+
 
 async function generateCard(template, inputs) {
 	// 69.6mm x 95.0mm (63mm x 88mm with bleed)
@@ -235,26 +295,13 @@ async function generateCard(template, inputs) {
 	template.layers.reverse()
 
 	// Draw the layers
+	// Use a normal for loop here to get around async anonymous functions
 	for (let index = 0; index < template.layers.length; index++) {
-		let layer = template.layers[index];
-		if (processConditions(layer.conditions, inputs)) {
-			// Update layer properties from inputs
-			for (const layerProperty in layer.inputs) {
-				if (layer.inputs.hasOwnProperty(layerProperty)) {
-					const inputName = layer.inputs[layerProperty];
-					if (inputs[inputName]) {
-						layer[layerProperty] = inputs[inputName]
-					}
-				}
-			}
-			// Draw the layer
-			try {
-				await drawLayer(layer, context)
-			} catch (error) {
-				console.log("Failed to draw layer " + layer.description + ": " + error.message)
-			}
-		} else {
-			console.log("Conditions for layer " + layer.description + " not met");
+		const layer = template.layers[index];
+		try {
+			await drawLayer(layer, context, inputs)
+		} catch (error) {
+			console.error(`Failed to draw layer ${layer.description} - ${error.message}`)
 		}
 	}
 
@@ -264,7 +311,7 @@ async function generateCard(template, inputs) {
 
 // Function that takes an image layer and returns a the image cropped and scaled as a canvas
 async function scaleImageLayer(layer) {
-	if (layer.type != "image") {
+	if (layer.type != "image" && layer.type != "mask") {
 		throw new Error("Tried to scale a non image layer")
 	} else if (layer.url == "") {
 		throw new Error("Layer has no URL")
@@ -348,6 +395,11 @@ function scaleTextLayer(layer) {
 	let canvas = createCanvas(layer.width, layer.height)
 	let context = canvas.getContext("2d")
 
+	// Set up the context
+	context.textAlign = "start"
+	context.textBaseline = "alphabetic"
+	context.fillStyle = layer.fillStyle
+
 	// Do any text replacements we need
 	let text = layer.text
 	for (const sourceString in layer.textReplace) {
@@ -380,10 +432,13 @@ function scaleTextLayer(layer) {
 						let secondSplit = toBeClosed.split(seperatorEnd)
 						let newStringFont = {}
 						if (secondSplit.length == 1) {
-							newStringFont = {}
-							newStringFont["text"] = secondSplit[0]
-							newStringFont["font"] = stringFont.font
-							stringWithFontsNew.push(newStringFont)
+							if (secondSplit[0] != "") {
+								// Only put the string in if it's not empty
+								newStringFont = {}
+								newStringFont["text"] = secondSplit[0]
+								newStringFont["font"] = stringFont.font
+								stringWithFontsNew.push(newStringFont)
+							}
 						} else if (secondSplit.length == 2) {
 							newStringFont = {}
 							newStringFont["text"] = secondSplit[0]
@@ -420,61 +475,218 @@ function scaleTextLayer(layer) {
 		}
 	}
 
-	// Set the fill style
-	context.fillStyle = layer.fillStyle
+	let lineBreaks = [{
+		"height": 0,
+		"baselineHeight": 0,
+		"width": 0,
+		"stringFonts": []
+	}]
 
-	// Set variables
-	let x = 0
-	let y = 0
-	
-	if (layer.wrapText || layer.scaleText) {
-		throw new Error("Text wrapping and Autoscaling not yet supported")
-	} else {
-		let totalWidth = 0
-		stringsWithFonts.forEach(stringFont => {
-			context.font = stringFont.font
-			totalWidth += context.measureText(stringFont.text).width
+	stringsWithFonts.forEach(stringFont => {
+		// Split at line breaks
+		let lines = stringFont.text.split("\n")
+		// Put the split stringFonts into the lineBreaks array
+		// The first one should always be on the current line
+		newStringFont = {}
+		newStringFont["text"] = lines[0]
+		newStringFont["font"] = stringFont.font
+		lineBreaks[lineBreaks.length - 1].stringFonts.push(newStringFont)
+		// Calculate line metrics
+		context.font = newStringFont.font
+		let metrics = context.measureText(newStringFont.text)
+		let height = metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent
+		lineBreaks[lineBreaks.length - 1].height = height > lineBreaks[lineBreaks.length - 1].height ? height : lineBreaks[lineBreaks.length - 1].height
+		lineBreaks[lineBreaks.length - 1].baselineHeight = metrics.fontBoundingBoxAscent > lineBreaks[lineBreaks.length - 1].baselineHeight ? metrics.fontBoundingBoxAscent : lineBreaks[lineBreaks.length - 1].baselineHeight
+		lineBreaks[lineBreaks.length - 1].width += metrics.width
+		// everything else goes onto a new line
+		if (lines.length > 1) {
+			lineBreaks.push({
+				"height": 0,
+				"baselineHeight": 0,
+				"width": 0,
+				"stringFonts": []
+			})
+			// Regular for loop so we can start at 1
+			for (let index = 1; index < lines.length; index++) {
+				const line = lines[index];
+				newStringFont = {}
+				newStringFont["text"] = line
+				newStringFont["font"] = stringFont.font
+				lineBreaks[lineBreaks.length - 1].stringFonts.push(newStringFont)
+				// Calculate line metrics
+				context.font = newStringFont.font
+				let metrics = context.measureText(newStringFont.text)
+				let height = metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent
+				lineBreaks[lineBreaks.length - 1].height = height > lineBreaks[lineBreaks.length - 1].height ? height : lineBreaks[lineBreaks.length - 1].height
+				lineBreaks[lineBreaks.length - 1].baselineHeight = metrics.fontBoundingBoxAscent > lineBreaks[lineBreaks.length - 1].baselineHeight ? metrics.fontBoundingBoxAscent : lineBreaks[lineBreaks.length - 1].baselineHeight
+				lineBreaks[lineBreaks.length - 1].width += metrics.width
+			}
+		}
+	})
+
+	let totalHeight = 0
+	let totalWidth = 0
+	let scale = 1
+	let finalLines
+
+	// Always run at least once
+	do {
+		// Clone the linebreaks array so we have a fresh array each loop
+		// I know this is a really dumb way of doing it but I really want an entirely new object with no references
+		finalLines = JSON.parse(JSON.stringify(lineBreaks))
+
+		// Word Wrapping
+		if (layer.wrapText) {
+			// Split each lines stringFonts into words as stringFonts
+			finalLines.forEach((line, index) => {
+				let splitLine = []
+				line.stringFonts.forEach(stringFont => {
+					let words = stringFont.text.split(" ")
+					words.forEach(wordString => {
+						newStringFont = {}
+						newStringFont["text"] = wordString
+						newStringFont["font"] = stringFont.font
+						splitLine.push(newStringFont)
+					});
+				})
+				finalLines[index].stringFonts = splitLine
+			});
+
+			// Check each line and where longer than a line, wrap to a new line
+			// Regular for loop used here so we can edit the array and then process the new values
+			for (let index = 0; index < finalLines.length; index++) {
+				const line = finalLines[index];
+				let currentLine = {
+					"height":0,
+					"baselineHeight": 0,
+					"width": 0,
+					"stringFonts": []
+				}
+				let lineWidth = 0
+				// Regular for loop used here so we can break from it to stop processing words processed in next line
+				for (let wordIndex = 0; wordIndex < line.stringFonts.length; wordIndex++) {
+					const wordFont = line.stringFonts[wordIndex];
+					// Make sure we measure with the space added back
+					let spacedText = wordIndex == 0 ? wordFont.text : " " + wordFont.text
+					// Measure the line with the word added in real units
+					context.font = wordFont.font
+					let metrics = context.measureText(spacedText)
+					lineWidth += metrics.width * scale
+					if (lineWidth > layer.width) {
+						// We need to wrap current word and onwards to a new line
+						let nextLine = {
+							"height": 0,
+							"baselineHeight": 0,
+							"width": 0,
+							"stringFonts": []
+						}
+						nextLine.stringFonts = line.stringFonts.slice(wordIndex)
+						finalLines.splice(index + 1, 0, nextLine)
+						// Replace the current line with the new current line with words that fit
+						finalLines.splice(index, 1, currentLine)
+						// Stop processing the current line
+						break
+					} else {
+						// Put the word into the current Line
+						newStringFont = {}
+						newStringFont["text"] = spacedText
+						newStringFont["font"] = wordFont.font
+						currentLine.stringFonts.push(newStringFont)
+
+						// Get the current Line metrics in real units
+						let newHeight = (metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent) * scale
+						let newBaselineHeight = metrics.fontBoundingBoxAscent * scale
+						// Save the current line metrics
+						currentLine.height = newHeight > currentLine.height ? newHeight : currentLine.height
+						currentLine.baselineHeight = newBaselineHeight > currentLine.baselineHeight ? newBaselineHeight : currentLine.baselineHeight
+						currentLine.width = lineWidth
+					}
+				}
+				// Replace the current line with the new current line with words that fit
+				finalLines.splice(index, 1, currentLine)
+			}
+		}
+
+		// Get the total height so we know where to start our cursor
+		totalHeight = 0
+		if (finalLines.length <= 1) {
+			finalLines[0].height = layer.wrapText ? finalLines[0].height : finalLines[0].height * scale //Make sure we're using the right units (if text was wrapped it's already in real units)
+			finalLines[0].baselineHeight = layer.wrapText ? finalLines[0].baselineHeight : finalLines[0].baselineHeight * scale //Make sure we're using the right units (if text was wrapped it's already in real units)
+			totalHeight = finalLines[0].height
+		} else {
+			finalLines.forEach(line => {
+				line.height = layer.wrapText ? line.height : line.height * scale //Make sure we're using the right units (if text was wrapped it's already in real units)
+				line.baselineHeight = layer.wrapText ? line.baselineHeight : line.baselineHeight * scale //Make sure we're using the right units (if text was wrapped it's already in real units)
+				totalHeight += line.height * layer.lineSpacing
+			});
+		}
+
+		// Get the total Width so we can scale horizontal text
+		totalWidth = 0
+		finalLines.forEach(line => {
+			line.width = layer.wrapText ? line.width : line.width * scale //Make sure we're using the right units (if text was wrapped it's already in real units)
+			totalWidth = line.width > totalWidth ? line.width : totalWidth
 		});
 
+		if (layer.scaleText && (totalHeight > layer.height || totalWidth > layer.width)) {
+			// If we're going to loop, scale the context
+			context.scale(0.95, 0.95)
+			scale = scale * 0.95
+		}
+	} while (layer.scaleText && (totalHeight > layer.height || totalWidth > layer.width));
+
+	// Set Cursor to origin
+	let x = 0
+	let y = 0
+
+	// Align Vertically / Set Baseline
+	switch (layer.baseline) {
+		case "top":
+			// Do nothing, we're already at x = 0
+			break;
+		case "middle":
+			// move to the middle of the layer then up to the start of the text
+			y = (layer.height / 2) - (totalHeight / 2)
+			break;
+		case "bottom":
+			// move to the bottom of the layer then up to the start of the text
+			y = layer.height - totalHeight
+			break;
+		default:
+			break;
+	}
+
+	// Draw each line
+	finalLines.forEach(line => {
 		// Align Horizontally if needed
-		context.textAlign = "start"
 		switch (layer.align) {
 			case "start":
 				x = 0
 				break;
 			case "center":
-				x = (layer.width / 2) - (totalWidth / 2)
+				x = (layer.width / 2) - (line.width / 2)
 				break;
 			case "right":
-				x = layer.width - totalWidth
+				x = layer.width - line.width
 				break;
 			default:
 				break;
 		}
 
-		// Align Vertically if needed
-		context.textBaseline = layer.baseline
-		switch (layer.baseline) {
-			case "top":
-				// do nothing start typing
-				break;
-			case "middle":
-				y = (layer.height / 2)
-				break;
-			case "bottom":
-				y = layer.height
-				break;
-			default:
-				break;
-		}
-		
-		// Draw the Text
-		stringsWithFonts.forEach(stringFont => {
+		// Move the cursor to the baseline of the current line
+		y += line.baselineHeight
+
+		// Draw each word of the line
+		line.stringFonts.forEach((stringFont, index) => {
 			context.font = stringFont.font
-			context.fillText(stringFont.text, x, y)
-			x += context.measureText(stringFont.text).width
-		});
-	}
+			// Divide by scale here so our real units turn into CSS units
+			context.fillText(stringFont.text, x / scale, y / scale)
+			x += context.measureText(stringFont.text).width * scale
+		})
+
+		// Move the cursor to the top of the next line
+		y = y - line.baselineHeight + (line.height * layer.lineSpacing)
+	});
 
 	// Return the completed Canvas
 	return canvas
@@ -493,19 +705,75 @@ function processConditions(conditions, inputs) {
 		if (conditions.hasOwnProperty(key)) {
 			const element = conditions[key];
 			
-			if (key == "or") {
-				// Process Or statement
-				let anyTrue = false
-				element.forEach(subConditions => {
-					let output = processConditions(subConditions, inputs)
-					if (output) {
-						anyTrue = true
+			switch (key) {
+				case "$or":
+					// Process Or statement
+					let anyTrue = false
+					element.forEach(subConditions => {
+						let output = processConditions(subConditions, inputs)
+						if (output) {
+							anyTrue = true
+						}
+					});
+					results.push(anyTrue)
+					break;
+
+				case "$not":
+					// Process Or statement
+					let inner = processConditions(element, inputs)
+					results.push(!inner)
+					break;
+
+				default:
+					// If element is an object (has subconditions like < > !)
+					if (typeof element == "object") {
+						// For each property in the object
+						for (const subCondition in element) {
+							if (element.hasOwnProperty(subCondition)) {
+								const subConditionData = element[subCondition];
+
+								// Switch on operators
+								switch (subCondition) {
+									case "$match":
+										// Regex match
+										results.push(inputs[key].match(subConditionData))
+										break;
+									
+									case "$lt":
+										// Less than
+										results.push(inputs[key] < subConditionData)
+										break;
+									
+									case "$lte":
+										// Less than or equal to
+										results.push(inputs[key] <= subConditionData)
+										break;
+
+									case "$gt":
+										//Greater than
+										results.push(inputs[key] > subConditionData)
+										break;
+
+									case "$gte":
+										// Greater than or equal to
+										results.push(inputs[key] >= subConditionData)
+										break;
+
+									case "$in":
+										// In array
+										results.push(subConditionData.includes(inputs[key]))
+										break;
+
+									default:
+										break;
+								}
+							}
+						}
+					} else {
+						// Check if input equals check condition
+						results.push(element == inputs[key])
 					}
-				});
-				results.push(anyTrue)
-			} else {
-				// Check if input equals check condition
-				results.push(element == inputs[key])
+					break;
 			}
 		}
 	}
