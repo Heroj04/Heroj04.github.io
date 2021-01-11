@@ -31,7 +31,7 @@ async function loadTemplate(path) {
 function loadImage(path) {
 	return new Promise((resolve, reject) => {
 		let img = new Image();
-		img.addEventListener('load', e => resolve(img));
+		img.addEventListener('load', () => resolve(img));
 		img.addEventListener('error', () => {
 			reject(new Error(`Failed to load image's URL: ${path}`));
 		});
@@ -172,13 +172,17 @@ function getInputValues(inputs) {
 						// Just get the value property - Nice and easy
 						output[input.name] = inputDOM.value
 						break;
+
 					case "checkbox":
 						// Checkboxes have just got to be different
 						output[input.name] = inputDOM.checked
 						break;
+
 					case "file":
 						// Take the file and make an object URL
 						output[input.name] = window.URL.createObjectURL(inputDOM.files[0])
+						break;
+
 					default:
 						break;
 				}
@@ -200,7 +204,7 @@ async function drawLayer(layer, context, inputs) {
 
 	// Substitute layer properties from inputs
 	for (const layerProperty in layer.inputs) {
-		if (layer.inputs.hasOwnProperty(layerProperty)) {
+		if (Object.prototype.hasOwnProperty.call(layer.inputs, layerProperty)) {
 			const inputName = layer.inputs[layerProperty];
 			if (inputs[inputName]) {
 				layer[layerProperty] = inputs[inputName]
@@ -210,7 +214,7 @@ async function drawLayer(layer, context, inputs) {
 
 	// Draw the layers
 	switch (layer.type) {
-		case "group":
+		case "group": {
 			// Create a new Canvas for the group
 			let subCanvas = createCanvas(layer.width, layer.height)
 			let subContext = subCanvas.getContext("2d")
@@ -226,20 +230,23 @@ async function drawLayer(layer, context, inputs) {
 			// Draw the new canvas to the original canvas
 			context.drawImage(subCanvas, layer.originX, layer.originY, layer.width, layer.height)
 			break;
+		}
 
-		case "text":
+		case "text": {
 			// Scale Text to size
 			let scaledText = await scaleTextLayer(layer)
 			// Draw the text to the canvas
 			context.drawImage(scaledText, layer.originX, layer.originY, layer.width, layer.height)
 			break;
+		}
 	
-		case "image":
+		case "image": {
 			// Scale Image to size
 			let scaledImage = await scaleImageLayer(layer)
 			// Draw the scaled image to the canvas
 			context.drawImage(scaledImage, layer.originX, layer.originY, layer.width, layer.height)
 			break;
+		}
 
 		case "fill":
 			// Draw a filled rectangle
@@ -249,7 +256,7 @@ async function drawLayer(layer, context, inputs) {
 			context.restore()
 			break;
 		
-		case "mask":
+		case "mask": {
 			// Scale Image to size
 			let maskImage = await scaleImageLayer(layer)
 			// Draw the scaled image to the canvas for each operation
@@ -260,6 +267,7 @@ async function drawLayer(layer, context, inputs) {
 				context.restore()
 			});
 			break;
+		}
 
 		default:
 			console.error("Unknown Layer type")
@@ -322,12 +330,7 @@ async function scaleImageLayer(layer) {
 	let context = canvas.getContext("2d")
 
 	// Get the image
-	let image
-	try {
-		image = await loadImage(layer.url)
-	} catch (error) {
-		throw error
-	}
+	let image = await loadImage(layer.url)
 
 	let x = 0
 	let y = 0 
@@ -403,7 +406,7 @@ function scaleTextLayer(layer) {
 	// Do any text replacements we need
 	let text = layer.text
 	for (const sourceString in layer.textReplace) {
-		if (layer.textReplace.hasOwnProperty(sourceString)) {
+		if (Object.prototype.hasOwnProperty.call(layer.textReplace, sourceString)) {
 			const replacementString = layer.textReplace[sourceString];
 			text = text.replaceAll(sourceString, replacementString)
 		}
@@ -415,10 +418,12 @@ function scaleTextLayer(layer) {
 	let temp = {}
 	temp["text"] = text
 	temp["font"] = layer.font
+	temp["fillStyle"] = layer.fillStyle
 	stringsWithFonts.push(temp)
 	for (const seperatorString in layer.fontReplace) {
-		if (layer.fontReplace.hasOwnProperty(seperatorString)) {
-			const font = layer.fontReplace[seperatorString];
+		if (Object.prototype.hasOwnProperty.call(layer.fontReplace, seperatorString)) {
+			const font = layer.fontReplace[seperatorString].font;
+			const fillStyle = layer.fontReplace[seperatorString].fillStyle;
 			// Seperator Boundaries
 			let stringWithFontsNew = []
 			let seperatorStart = seperatorString.substring(0, seperatorString.length / 2) //First half of string
@@ -437,17 +442,20 @@ function scaleTextLayer(layer) {
 								newStringFont = {}
 								newStringFont["text"] = secondSplit[0]
 								newStringFont["font"] = stringFont.font
+								newStringFont["fillStyle"] = stringFont.fillStyle
 								stringWithFontsNew.push(newStringFont)
 							}
 						} else if (secondSplit.length == 2) {
 							newStringFont = {}
 							newStringFont["text"] = secondSplit[0]
 							newStringFont["font"] = font
+							newStringFont["fillStyle"] = fillStyle
 							stringWithFontsNew.push(newStringFont)
 							if (secondSplit[1] != "") {
 								newStringFont = {}
 								newStringFont["text"] = secondSplit[1]
 								newStringFont["font"] = stringFont.font
+								newStringFont["fillStyle"] = stringFont.fillStyle
 								stringWithFontsNew.push(newStringFont)
 							}
 						} else {
@@ -457,11 +465,13 @@ function scaleTextLayer(layer) {
 							newStringFont = {}
 							newStringFont["text"] = firstString
 							newStringFont["font"] = stringFont.font
+							newStringFont["fillStyle"] = stringFont.fillStyle
 							stringWithFontsNew.push(newStringFont)
 							if (finalString != "") {
 								newStringFont = {}
 								newStringFont["text"] = finalString
 								newStringFont["font"] = font
+								newStringFont["fillStyle"] = fillStyle
 								stringWithFontsNew.push(newStringFont)
 							}
 						}
@@ -487,12 +497,14 @@ function scaleTextLayer(layer) {
 		let lines = stringFont.text.split("\n")
 		// Put the split stringFonts into the lineBreaks array
 		// The first one should always be on the current line
-		newStringFont = {}
+		let newStringFont = {}
 		newStringFont["text"] = lines[0]
 		newStringFont["font"] = stringFont.font
+		newStringFont["fillStyle"] = stringFont.fillStyle
 		lineBreaks[lineBreaks.length - 1].stringFonts.push(newStringFont)
 		// Calculate line metrics
 		context.font = newStringFont.font
+		context.fillStyle = newStringFont.fillStyle
 		let metrics = context.measureText(newStringFont.text)
 		let height = metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent
 		lineBreaks[lineBreaks.length - 1].height = height > lineBreaks[lineBreaks.length - 1].height ? height : lineBreaks[lineBreaks.length - 1].height
@@ -512,9 +524,11 @@ function scaleTextLayer(layer) {
 				newStringFont = {}
 				newStringFont["text"] = line
 				newStringFont["font"] = stringFont.font
+				newStringFont["fillStyle"] = stringFont.fillStyle
 				lineBreaks[lineBreaks.length - 1].stringFonts.push(newStringFont)
 				// Calculate line metrics
 				context.font = newStringFont.font
+				context.fillStyle = newStringFont.fillStyle
 				let metrics = context.measureText(newStringFont.text)
 				let height = metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent
 				lineBreaks[lineBreaks.length - 1].height = height > lineBreaks[lineBreaks.length - 1].height ? height : lineBreaks[lineBreaks.length - 1].height
@@ -543,9 +557,10 @@ function scaleTextLayer(layer) {
 				line.stringFonts.forEach(stringFont => {
 					let words = stringFont.text.split(" ")
 					words.forEach(wordString => {
-						newStringFont = {}
+						let newStringFont = {}
 						newStringFont["text"] = wordString
 						newStringFont["font"] = stringFont.font
+						newStringFont["fillStyle"] = stringFont.fillStyle
 						splitLine.push(newStringFont)
 					});
 				})
@@ -570,6 +585,7 @@ function scaleTextLayer(layer) {
 					let spacedText = wordIndex == 0 ? wordFont.text : " " + wordFont.text
 					// Measure the line with the word added in real units
 					context.font = wordFont.font
+					context.fillStyle = wordFont.fillStyle
 					let metrics = context.measureText(spacedText)
 					lineWidth += metrics.width * scale
 					if (lineWidth > layer.width) {
@@ -588,9 +604,10 @@ function scaleTextLayer(layer) {
 						break
 					} else {
 						// Put the word into the current Line
-						newStringFont = {}
+						let newStringFont = {}
 						newStringFont["text"] = spacedText
 						newStringFont["font"] = wordFont.font
+						newStringFont["fillStyle"] = wordFont.fillStyle
 						currentLine.stringFonts.push(newStringFont)
 
 						// Get the current Line metrics in real units
@@ -677,8 +694,9 @@ function scaleTextLayer(layer) {
 		y += line.baselineHeight
 
 		// Draw each word of the line
-		line.stringFonts.forEach((stringFont, index) => {
+		line.stringFonts.forEach(stringFont => {
 			context.font = stringFont.font
+			context.fillStyle = stringFont.fillStyle
 			// Divide by scale here so our real units turn into CSS units
 			context.fillText(stringFont.text, x / scale, y / scale)
 			x += context.measureText(stringFont.text).width * scale
@@ -702,11 +720,11 @@ function processConditions(conditions, inputs) {
 	let results = []
 
 	for (const key in conditions) {
-		if (conditions.hasOwnProperty(key)) {
+		if (Object.prototype.hasOwnProperty.call(conditions, key)) {
 			const element = conditions[key];
 			
 			switch (key) {
-				case "$or":
+				case "$or": {
 					// Process Or statement
 					let anyTrue = false
 					element.forEach(subConditions => {
@@ -717,19 +735,21 @@ function processConditions(conditions, inputs) {
 					});
 					results.push(anyTrue)
 					break;
+				}
 
-				case "$not":
+				case "$not": {
 					// Process Or statement
 					let inner = processConditions(element, inputs)
 					results.push(!inner)
 					break;
+				}
 
 				default:
 					// If element is an object (has subconditions like < > !)
 					if (typeof element == "object") {
 						// For each property in the object
 						for (const subCondition in element) {
-							if (element.hasOwnProperty(subCondition)) {
+							if (Object.prototype.hasOwnProperty.call(element, subCondition)) {
 								const subConditionData = element[subCondition];
 
 								// Switch on operators
