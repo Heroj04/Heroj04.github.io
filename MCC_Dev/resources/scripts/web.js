@@ -1,3 +1,8 @@
+const defaultTemplates = [
+	"templates/basicFullArtLand/basicFullArtLand.json",
+	"templates/ikoriaShowcase/ikoriaShowcase.json"
+]
+
 async function generate() {
 	console.log("Generating Image")
 	// Get the template and inputs
@@ -26,7 +31,7 @@ async function inputUpdate() {
 	document.getElementById("download-link").setAttribute("download", template.name + ".png")
 }
 
-async function loadTemplateToPage(url) {
+async function loadTemplateToPage(templateURL) {
 	loadTemplate(templateURL).then(template => {
 		document.getElementById("json").value = JSON.stringify(template)
 		inputUpdate()
@@ -36,11 +41,7 @@ async function loadTemplateToPage(url) {
 }
 
 function injectTemplateCards() {
-	const templates = [
-		"templates/basicFullArtLand/basicFullArtLand.json"
-	]
-
-	templates.forEach(templateURL => {
+	defaultTemplates.forEach(templateURL => {
 		loadTemplate(templateURL).then(template => {
 			// Create Div Soup Here
 			let cardDiv = document.createElement("DIV")
