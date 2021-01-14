@@ -1,6 +1,6 @@
 {
-	"name": "Basic Full Art Land",
-	"author": "Chilli_Axe & Mr Hero",
+	"name": "Ikoria Showcase Promo",
+	"author": "Mr Hero",
 	"width": 3288,
 	"height": 4488,
 	"dpi": 1200,
@@ -26,32 +26,83 @@
 	],
 	"inputs": [
 		{
-			"name": "cardName",
+			"name": "name",
 			"type": "text",
 			"description": "Card Name",
 			"default": "Plains",
 			"halfSize": true
 		},
 		{
-			"name": "landType",
-			"type": "combo",
-			"description": "Land Type",
+			"name": "alias",
+			"type": "text",
+			"description": "Card Alias",
 			"default": "Plains",
+			"halfSize": true
+		},
+		{
+			"name": "cost",
+			"type": "text",
+			"description": "Mana Cost",
+			"default": "{W}{U}{B}{R}{G}",
+			"halfSize": true
+		},
+		{
+			"name": "color",
+			"type": "combo",
+			"description": "Frame Color",
+			"default": "Gold",
 			"options": [
-				"Plains",
-				"Island",
-				"Swamp",
-				"Mountain",
-				"Forest",
-				"Wastes"
+				"Gold",
+				"White",
+				"Blue",
+				"Black",
+				"Red",
+				"Green",
+				"Colorless",
+				"WU - Azorius",
+				"WB - Orzhov",
+				"UB - Dimir",
+				"UR - Izzet",
+				"BR - Rakdos",
+				"BG - Golgari",
+				"RG - Gruul",
+				"RW - Boros",
+				"GW - Selesnya",
+				"GU - Simic"
 			],
 			"halfSize": true
 		},
 		{
 			"name": "art",
 			"type": "file",
-			"description": "Art Image URL",
-			"default": "https://cdna.artstation.com/p/assets/images/images/010/109/908/large/sam-burley-burley-plainsbfz.jpg"
+			"description": "Art Image",
+			"default": ""
+		},
+		{
+			"name": "foregroundArt",
+			"type": "file",
+			"description": "Foreground Art Image",
+			"default": "",
+			"help": "This art is placed over the top of everything, including the frame and text"
+		},
+		{
+			"name": "type",
+			"type": "text",
+			"description": "Card Type",
+			"default": "Creature — Dinosaur"
+		},
+		{
+			"name": "rules",
+			"type": "textarea",
+			"description": "Rules Text",
+			"default": "Trample",
+			"help": "Text enclosed in (parentheses) will be automatically written in italics"
+		},
+		{
+			"name": "PT",
+			"type": "text",
+			"description": "Power/Toughness",
+			"default": "6/6"
 		},
 		{
 			"name": "artist",
@@ -91,7 +142,20 @@
 			"scaleText": false,
 			"lineSpacing": 1.4,
 			"inputs": {
-				"text": "cardName"
+				"text": "name"
+			},
+			"textReplace": {
+				"{G}": "<sg>o<eg><g>"
+			},
+			"fontReplace": {
+				"<sg><eg>": {
+					"font": "140px NDPMTG",
+					"fillStyle": "green"
+				},
+				"<>": {
+					"font": "140px NDPMTG",
+					"fillStyle": "black"
+				}
 			}
 		},
 		{
